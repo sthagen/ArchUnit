@@ -13,8 +13,10 @@ import java.util.Set;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.base.Function;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.properties.HasName;
 import com.tngtech.archunit.core.domain.properties.HasType;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.java.junit.dataprovider.DataProvider;
 import com.tngtech.java.junit.dataprovider.DataProviderRunner;
@@ -30,16 +32,22 @@ import static com.tngtech.archunit.base.DescribedPredicate.equalTo;
 import static com.tngtech.archunit.base.DescribedPredicate.not;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.assignableFrom;
 import static com.tngtech.archunit.core.domain.JavaModifier.PRIVATE;
+import static com.tngtech.archunit.core.domain.properties.HasName.AndFullName.Predicates.fullNameMatching;
 import static com.tngtech.archunit.core.domain.properties.HasName.Functions.GET_NAME;
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.core.domain.properties.HasType.Functions.GET_RAW_TYPE;
+import static com.tngtech.archunit.lang.conditions.ArchConditions.fullyQualifiedName;
 import static com.tngtech.archunit.lang.conditions.ArchPredicates.are;
+import static com.tngtech.archunit.lang.conditions.ArchPredicates.have;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.elements.ClassesShouldEvaluator.filterClassesAppearingInFailureReport;
 import static com.tngtech.archunit.testutil.Assertions.assertThat;
+import static com.tngtech.archunit.testutil.Assertions.assertThatRule;
 import static com.tngtech.archunit.testutil.Assertions.assertThatType;
 import static com.tngtech.archunit.testutil.Assertions.assertThatTypes;
 import static com.tngtech.java.junit.dataprovider.DataProviders.testForEach;
+import static java.util.regex.Pattern.quote;
 
 @RunWith(DataProviderRunner.class)
 public class ShouldClassesThatTest {
@@ -334,6 +342,111 @@ public class ShouldClassesThatTest {
                 .on(ClassAccessingAnnotatedClass.class, ClassAccessingSimpleClass.class);
 
         assertThatType(getOnlyElement(classes)).matches(ClassAccessingAnnotatedClass.class);
+    }
+
+    private static class Data_of_containAnyMembersThat {
+        @SuppressWarnings("unused")
+        static class ViolatingOrigin {
+            void call() {
+                new ViolatingTarget("").aMethod();
+            }
+        }
+
+        @SuppressWarnings("unused")
+        static class ViolatingTarget {
+            static {
+                System.out.println("static initializer");
+            }
+
+            Object aField;
+
+            ViolatingTarget(Object aParam) {
+            }
+
+            void aMethod() {
+            }
+        }
+
+        @SuppressWarnings("unused")
+        static class OkayOrigin {
+            void call() {
+                new Data_of_containAnyMembersThat.OkayTarget("").bMethod();
+            }
+        }
+
+        @SuppressWarnings("unused")
+        static class OkayTarget {
+            String bField;
+
+            OkayTarget(String bParam) {
+            }
+
+            void bMethod() {
+            }
+        }
+    }
+
+    @Test
+    @UseDataProvider("no_classes_should_that_rule_starts")
+    public void containAnyMembersThat(ClassesThat<ClassesShouldConjunction> noClassesShouldThatRuleStart) {
+        Set<JavaClass> classes = filterClassesAppearingInFailureReport(noClassesShouldThatRuleStart.containAnyMembersThat(have(name("aField"))))
+                .on(Data_of_containAnyMembersThat.OkayOrigin.class, Data_of_containAnyMembersThat.ViolatingOrigin.class,
+                        Data_of_containAnyMembersThat.OkayTarget.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+
+        assertThatTypes(classes).matchInAnyOrder(Data_of_containAnyMembersThat.ViolatingOrigin.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+    }
+
+    @Test
+    @UseDataProvider("no_classes_should_that_rule_starts")
+    public void containAnyFieldsThat(ClassesThat<ClassesShouldConjunction> noClassesShouldThatRuleStart) {
+        Set<JavaClass> classes = filterClassesAppearingInFailureReport(noClassesShouldThatRuleStart.containAnyFieldsThat(have(name("aField"))))
+                .on(Data_of_containAnyMembersThat.OkayOrigin.class, Data_of_containAnyMembersThat.ViolatingOrigin.class,
+                        Data_of_containAnyMembersThat.OkayTarget.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+
+        assertThatTypes(classes).matchInAnyOrder(Data_of_containAnyMembersThat.ViolatingOrigin.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+    }
+
+    @Test
+    @UseDataProvider("no_classes_should_that_rule_starts")
+    public void containAnyCodeUnitsThat(ClassesThat<ClassesShouldConjunction> noClassesShouldThatRuleStart) {
+        Set<JavaClass> classes = filterClassesAppearingInFailureReport(noClassesShouldThatRuleStart.containAnyCodeUnitsThat(have(name("aMethod"))))
+                .on(Data_of_containAnyMembersThat.OkayOrigin.class, Data_of_containAnyMembersThat.ViolatingOrigin.class,
+                        Data_of_containAnyMembersThat.OkayTarget.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+
+        assertThatTypes(classes).matchInAnyOrder(Data_of_containAnyMembersThat.ViolatingOrigin.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+    }
+
+    @Test
+    @UseDataProvider("no_classes_should_that_rule_starts")
+    public void containAnyMethodsThat(ClassesThat<ClassesShouldConjunction> noClassesShouldThatRuleStart) {
+        Set<JavaClass> classes = filterClassesAppearingInFailureReport(noClassesShouldThatRuleStart.containAnyMethodsThat(have(name("aMethod"))))
+                .on(Data_of_containAnyMembersThat.OkayOrigin.class, Data_of_containAnyMembersThat.ViolatingOrigin.class,
+                        Data_of_containAnyMembersThat.OkayTarget.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+
+        assertThatTypes(classes).matchInAnyOrder(Data_of_containAnyMembersThat.ViolatingOrigin.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+    }
+
+    @Test
+    @UseDataProvider("no_classes_should_that_rule_starts")
+    public void containAnyConstructorsThat(ClassesThat<ClassesShouldConjunction> noClassesShouldThatRuleStart) {
+        ArchRule rule = noClassesShouldThatRuleStart.containAnyConstructorsThat(have(fullNameMatching(".*" + quote(Object.class.getName()) + ".*")));
+        Set<JavaClass> classes = filterClassesAppearingInFailureReport(rule)
+                .on(Data_of_containAnyMembersThat.OkayOrigin.class, Data_of_containAnyMembersThat.ViolatingOrigin.class,
+                        Data_of_containAnyMembersThat.OkayTarget.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+
+        assertThatTypes(classes).matchInAnyOrder(Data_of_containAnyMembersThat.ViolatingOrigin.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+    }
+
+    @Test
+    @UseDataProvider("no_classes_should_that_rule_starts")
+    public void containAnyStaticInitializersThat(ClassesThat<ClassesShouldConjunction> noClassesShouldThatRuleStart) {
+        ArchRule rule = noClassesShouldThatRuleStart.containAnyStaticInitializersThat(
+                have(fullNameMatching(quote(Data_of_containAnyMembersThat.ViolatingTarget.class.getName()) + ".*")));
+        Set<JavaClass> classes = filterClassesAppearingInFailureReport(rule)
+                .on(Data_of_containAnyMembersThat.OkayOrigin.class, Data_of_containAnyMembersThat.ViolatingOrigin.class,
+                        Data_of_containAnyMembersThat.OkayTarget.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
+
+        assertThatTypes(classes).matchInAnyOrder(Data_of_containAnyMembersThat.ViolatingOrigin.class, Data_of_containAnyMembersThat.ViolatingTarget.class);
     }
 
     @Test
@@ -730,6 +843,18 @@ public class ShouldClassesThatTest {
                 .on(ClassAccessingAnnotation.class, ClassAccessingString.class);
 
         assertThatTypes(classes).matchInAnyOrder(ClassAccessingString.class);
+    }
+
+    @Test
+    public void areRecords_predicate() {
+        // Tested in ShouldClassesThatRecordsTest, we'll satisfy the consistency test with this quick hack
+        noClasses().should().accessClassesThat().areRecords();
+    }
+
+    @Test
+    public void areNotRecords_predicate() {
+        // Tested in ShouldClassesThatRecordsTest, we'll satisfy the consistency test with this quick hack
+        noClasses().should().accessClassesThat().areNotRecords();
     }
 
     @Test
@@ -1589,6 +1714,54 @@ public class ShouldClassesThatTest {
                 classes().should().onlyAccessClassesThat(are(not(assignableFrom(classWithNameOf(Collection.class))))));
 
         assertThat(classes).isEmpty();
+    }
+
+    private static class TransitivelyDependOnClassesThatTestCases {
+        @SuppressWarnings("unused")
+        static class TestClass {
+            DirectlyDependentClass1 directDependency1;
+            DirectlyDependentClass2 directDependency2;
+        }
+
+        @SuppressWarnings("unused")
+        static class DirectlyDependentClass1 {
+            TransitivelyDependentClass transitiveDependency1;
+        }
+
+        @SuppressWarnings("unused")
+        static class DirectlyDependentClass2{
+            DirectlyDependentClass1 otherDependency;
+            TransitivelyDependentClass transitiveDependency2;
+        }
+
+        static class TransitivelyDependentClass {
+        }
+    }
+
+    @Test
+    @DataProvider(value={"true", "false"})
+    public void transitivelyDependOnClassesThat_reports_all_transitive_dependencies(boolean viaPredicate) {
+        Class<?> testClass = TransitivelyDependOnClassesThatTestCases.TestClass.class;
+        Class<?> directlyDependentClass1 = TransitivelyDependOnClassesThatTestCases.DirectlyDependentClass1.class;
+        Class<?> directlyDependentClass2 = TransitivelyDependOnClassesThatTestCases.DirectlyDependentClass2.class;
+        Class<?> transitivelyDependentClass = TransitivelyDependOnClassesThatTestCases.TransitivelyDependentClass.class;
+        JavaClasses classes = new ClassFileImporter().importClasses(
+                testClass, directlyDependentClass1, directlyDependentClass2, transitivelyDependentClass
+        );
+
+        ClassesShould noClassesShould = noClasses().that().haveFullyQualifiedName(testClass.getName()).should();
+        ArchRule rule =  viaPredicate
+                ? noClassesShould.transitivelyDependOnClassesThat(have(fullyQualifiedName(transitivelyDependentClass.getName())))
+                : noClassesShould.transitivelyDependOnClassesThat().haveFullyQualifiedName(transitivelyDependentClass.getName());
+
+        assertThatRule(rule).checking(classes)
+                .hasViolations(2)
+                .hasViolationMatching(String.format(".*%s\\.%s.* has type .*%s.*",
+                        quote(directlyDependentClass1.getName()), "transitiveDependency1", quote(transitivelyDependentClass.getName())
+                ))
+                .hasViolationMatching(String.format(".*%s\\.%s.* has type .*%s.*",
+                        quote(directlyDependentClass2.getName()), "transitiveDependency2", quote(transitivelyDependentClass.getName())
+                ));
     }
 
     private static DescribedPredicate<HasName> classWithNameOf(Class<?> type) {

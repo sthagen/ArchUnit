@@ -47,16 +47,18 @@ import com.tngtech.archunit.core.domain.JavaType;
 import com.tngtech.archunit.core.domain.JavaTypeVariable;
 import com.tngtech.archunit.core.importer.AccessRecord.FieldAccessRecord;
 import com.tngtech.archunit.core.importer.DomainBuilders.JavaAnnotationBuilder.ValueBuilder;
+import com.tngtech.archunit.core.importer.DomainBuilders.JavaClassTypeParametersBuilder;
 import com.tngtech.archunit.core.importer.DomainBuilders.JavaConstructorCallBuilder;
 import com.tngtech.archunit.core.importer.DomainBuilders.JavaFieldAccessBuilder;
 import com.tngtech.archunit.core.importer.DomainBuilders.JavaMethodCallBuilder;
 import com.tngtech.archunit.core.importer.DomainBuilders.JavaParameterizedTypeBuilder;
-import com.tngtech.archunit.core.importer.DomainBuilders.TypeParametersBuilder;
+import com.tngtech.archunit.core.importer.RawAccessRecord.CodeUnit;
 import com.tngtech.archunit.core.importer.resolvers.ClassResolver;
 
 import static com.tngtech.archunit.core.domain.DomainObjectCreationContext.completeAnnotations;
 import static com.tngtech.archunit.core.domain.DomainObjectCreationContext.completeClassHierarchy;
-import static com.tngtech.archunit.core.domain.DomainObjectCreationContext.completeEnclosingClass;
+import static com.tngtech.archunit.core.domain.DomainObjectCreationContext.completeEnclosingDeclaration;
+import static com.tngtech.archunit.core.domain.DomainObjectCreationContext.completeGenericInterfaces;
 import static com.tngtech.archunit.core.domain.DomainObjectCreationContext.completeGenericSuperclass;
 import static com.tngtech.archunit.core.domain.DomainObjectCreationContext.completeMembers;
 import static com.tngtech.archunit.core.domain.DomainObjectCreationContext.completeTypeParameters;
@@ -141,9 +143,10 @@ class ClassGraphCreator implements ImportContext {
     private void completeClasses() {
         for (JavaClass javaClass : classes.getAllWithOuterClassesSortedBeforeInnerClasses()) {
             completeClassHierarchy(javaClass, this);
-            completeEnclosingClass(javaClass, this);
+            completeEnclosingDeclaration(javaClass, this);
             completeTypeParameters(javaClass, this);
             completeGenericSuperclass(javaClass, this);
+            completeGenericInterfaces(javaClass, this);
             completeMembers(javaClass, this);
             completeAnnotations(javaClass, this);
         }
@@ -247,6 +250,20 @@ class ClassGraphCreator implements ImportContext {
                 : Optional.<JavaType>absent();
     }
 
+    @Override
+    public Optional<Set<JavaType>> createGenericInterfaces(JavaClass owner) {
+        Optional<Set<JavaParameterizedTypeBuilder<JavaClass>>> genericInterfaceBuilders = importRecord.getGenericInterfacesFor(owner);
+        if (!genericInterfaceBuilders.isPresent()) {
+            return Optional.absent();
+        }
+
+        ImmutableSet.Builder<JavaType> result = ImmutableSet.builder();
+        for (JavaParameterizedTypeBuilder<JavaClass> builder : genericInterfaceBuilders.get()) {
+            result.add(builder.build(owner, getTypeParametersInContextOf(owner), classes.byTypeName()));
+        }
+        return Optional.<Set<JavaType>>of(result.build());
+    }
+
     private static Iterable<JavaTypeVariable<?>> getTypeParametersInContextOf(JavaClass javaClass) {
         Set<JavaTypeVariable<?>> result = Sets.<JavaTypeVariable<?>>newHashSet(javaClass.getTypeParameters());
         while (javaClass.getEnclosingClass().isPresent()) {
@@ -267,7 +284,7 @@ class ClassGraphCreator implements ImportContext {
 
     @Override
     public List<JavaTypeVariable<JavaClass>> createTypeParameters(JavaClass owner) {
-        TypeParametersBuilder typeParametersBuilder = importRecord.getTypeParameterBuildersFor(owner.getName());
+        JavaClassTypeParametersBuilder typeParametersBuilder = importRecord.getTypeParameterBuildersFor(owner.getName());
         return typeParametersBuilder.build(owner, classes.byTypeName());
     }
 
@@ -328,6 +345,18 @@ class ClassGraphCreator implements ImportContext {
         return enclosingClassName.isPresent() ?
                 Optional.of(classes.getOrResolve(enclosingClassName.get())) :
                 Optional.<JavaClass>absent();
+    }
+
+    @Override
+    public Optional<JavaCodeUnit> createEnclosingCodeUnit(JavaClass owner) {
+        Optional<CodeUnit> enclosingCodeUnit = importRecord.getEnclosingCodeUnitFor(owner.getName());
+        if (!enclosingCodeUnit.isPresent()) {
+            return Optional.absent();
+        }
+
+        CodeUnit codeUnit = enclosingCodeUnit.get();
+        JavaClass enclosingClass = classes.getOrResolve(codeUnit.getDeclaringClassName());
+        return enclosingClass.tryGetCodeUnitWithParameterTypeNames(codeUnit.getName(), codeUnit.getParameters());
     }
 
     @Override

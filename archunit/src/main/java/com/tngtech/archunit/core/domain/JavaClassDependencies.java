@@ -25,6 +25,7 @@ import com.tngtech.archunit.base.HasDescription;
 import com.tngtech.archunit.core.domain.JavaAnnotation.DefaultParameterVisitor;
 import com.tngtech.archunit.core.domain.properties.HasAnnotations;
 
+import static com.google.common.base.Predicates.instanceOf;
 import static com.google.common.base.Suppliers.memoize;
 import static com.google.common.collect.Iterables.concat;
 import static java.util.Collections.emptySet;
@@ -73,10 +74,11 @@ class JavaClassDependencies {
 
     private Set<Dependency> inheritanceDependenciesFromSelf() {
         ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
-        for (JavaClass supertype : FluentIterable.from(javaClass.getInterfaces()).append(javaClass.getRawSuperclass().asSet())) {
+        for (JavaClass supertype : FluentIterable.from(javaClass.getRawInterfaces()).append(javaClass.getRawSuperclass().asSet())) {
             result.add(Dependency.fromInheritance(javaClass, supertype));
         }
         result.addAll(genericSuperclassTypeArgumentDependencies());
+        result.addAll(genericInterfaceTypeArgumentDependencies());
         return result.build();
     }
 
@@ -94,10 +96,42 @@ class JavaClassDependencies {
         return result.build();
     }
 
+    private Set<Dependency> genericInterfaceTypeArgumentDependencies() {
+        ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
+        for (JavaParameterizedType genericInterface : getGenericInterfacesOf(javaClass)) {
+            List<JavaType> actualTypeArguments = genericInterface.getActualTypeArguments();
+            for (JavaClass interfaceTypeArgumentDependency : dependenciesOfTypes(actualTypeArguments)) {
+                result.addAll(Dependency.tryCreateFromGenericInterfaceTypeArgument(javaClass, genericInterface, interfaceTypeArgumentDependency));
+            }
+        }
+        return result.build();
+    }
+
+    // the cast is safe since we are explicitly filtering instanceOf(..)
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Iterable<JavaParameterizedType> getGenericInterfacesOf(JavaClass javaClass) {
+        return (Iterable) FluentIterable.from(javaClass.getInterfaces()).filter(instanceOf(JavaParameterizedType.class));
+    }
+
     private Set<Dependency> fieldDependenciesFromSelf() {
         ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
         for (JavaField field : javaClass.getFields()) {
             result.addAll(Dependency.tryCreateFromField(field));
+            result.addAll(genericFieldTypeArgumentDependencies(field));
+        }
+        return result.build();
+    }
+
+    private Set<Dependency> genericFieldTypeArgumentDependencies(JavaField field) {
+        if (!(field.getType() instanceof JavaParameterizedType)) {
+            return emptySet();
+        }
+        JavaParameterizedType fieldType = (JavaParameterizedType) field.getType();
+
+        List<JavaType> actualTypeArguments = fieldType.getActualTypeArguments();
+        ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
+        for (JavaClass fieldTypeArgumentDependency : dependenciesOfTypes(actualTypeArguments)) {
+            result.addAll(Dependency.tryCreateFromGenericFieldTypeArgument(field, fieldTypeArgumentDependency));
         }
         return result.build();
     }
@@ -106,6 +140,21 @@ class JavaClassDependencies {
         ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
         for (JavaMethod method : javaClass.getMethods()) {
             result.addAll(Dependency.tryCreateFromReturnType(method));
+            result.addAll(genericReturnTypeArgumentDependencies(method));
+        }
+        return result.build();
+    }
+
+    private Set<Dependency> genericReturnTypeArgumentDependencies(JavaMethod method) {
+        if (!(method.getReturnType() instanceof JavaParameterizedType)) {
+            return emptySet();
+        }
+        JavaParameterizedType returnType = (JavaParameterizedType) method.getReturnType();
+
+        List<JavaType> actualTypeArguments = returnType.getActualTypeArguments();
+        ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
+        for (JavaClass returnTypeArgumentDependency : dependenciesOfTypes(actualTypeArguments)) {
+            result.addAll(Dependency.tryCreateFromGenericMethodReturnTypeArgument(method, returnTypeArgumentDependency));
         }
         return result.build();
     }
@@ -169,8 +218,25 @@ class JavaClassDependencies {
 
     private Set<Dependency> typeParameterDependenciesFromSelf() {
         ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
+        result.addAll(classTypeParameterDependenciesFromSelf());
+        result.addAll(codeUnitTypeParameterDependenciesFromSelf());
+        return result.build();
+    }
+
+    private ImmutableSet<Dependency> classTypeParameterDependenciesFromSelf() {
+        ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
         for (JavaTypeVariable<?> typeVariable : javaClass.getTypeParameters()) {
             result.addAll(getDependenciesFromTypeParameter(typeVariable));
+        }
+        return result.build();
+    }
+
+    private ImmutableSet<Dependency> codeUnitTypeParameterDependenciesFromSelf() {
+        ImmutableSet.Builder<Dependency> result = ImmutableSet.builder();
+        for (JavaCodeUnit codeUnit : javaClass.getCodeUnits()) {
+            for (JavaTypeVariable<?> typeVariable : codeUnit.getTypeParameters()) {
+                result.addAll(getDependenciesFromTypeParameter(typeVariable));
+            }
         }
         return result.build();
     }

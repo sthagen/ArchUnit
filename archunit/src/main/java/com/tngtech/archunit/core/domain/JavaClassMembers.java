@@ -69,7 +69,7 @@ class JavaClassMembers {
             @Override
             public Set<JavaField> get() {
                 ImmutableSet.Builder<JavaField> result = ImmutableSet.builder();
-                for (JavaClass javaClass : concat(owner.getClassHierarchy(), owner.getAllInterfaces())) {
+                for (JavaClass javaClass : concat(owner.getClassHierarchy(), owner.getAllRawInterfaces())) {
                     result.addAll(javaClass.getFields());
                 }
                 return result.build();
@@ -79,7 +79,7 @@ class JavaClassMembers {
             @Override
             public Set<JavaMethod> get() {
                 ImmutableSet.Builder<JavaMethod> result = ImmutableSet.builder();
-                for (JavaClass javaClass : concat(owner.getClassHierarchy(), owner.getAllInterfaces())) {
+                for (JavaClass javaClass : concat(owner.getClassHierarchy(), owner.getAllRawInterfaces())) {
                     result.addAll(javaClass.getMethods());
                 }
                 return result.build();
@@ -136,6 +136,10 @@ class JavaClassMembers {
 
     JavaCodeUnit getCodeUnitWithParameterTypeNames(String name, List<String> parameters) {
         return findMatchingCodeUnit(codeUnits, name, parameters);
+    }
+
+    Optional<JavaCodeUnit> tryGetCodeUnitWithParameterTypeNames(String name, List<String> parameters) {
+        return tryFindMatchingCodeUnit(codeUnits, name, parameters);
     }
 
     JavaMethod getMethod(String name, List<String> parameterTypeNames) {

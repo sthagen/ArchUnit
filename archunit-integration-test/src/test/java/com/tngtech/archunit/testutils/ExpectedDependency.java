@@ -1,7 +1,15 @@
 package com.tngtech.archunit.testutils;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Type;
+import java.util.Collection;
+
+import com.google.common.collect.ImmutableList;
 import com.tngtech.archunit.core.domain.Dependency;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.tngtech.archunit.core.domain.JavaConstructor.CONSTRUCTOR_NAME;
 import static java.util.regex.Pattern.quote;
 
@@ -29,8 +37,32 @@ public class ExpectedDependency implements ExpectedRelation {
         return new TypeParameterCreator(clazz, typeParameterName);
     }
 
-    public static GenericSuperclassTypeArgumentCreator genericSuperclass(Class<?> clazz, Class<?> genericSuperclassErasure) {
-        return new GenericSuperclassTypeArgumentCreator(clazz, genericSuperclassErasure);
+    public static GenericSupertypeTypeArgumentCreator genericSuperclassOf(Class<?> clazz) {
+        return new GenericSupertypeTypeArgumentCreator(clazz, "superclass", clazz.getGenericSuperclass());
+    }
+
+    public static GenericSupertypeTypeArgumentCreator genericInterfaceOf(Class<?> clazz) {
+        Collection<Type> interfaces = ImmutableList.copyOf(clazz.getGenericInterfaces());
+        checkArgument(interfaces.size() == 1,
+                "Currently only exactly one generic interface is supported, but %s has the following generic interfaces: %s. "
+                        + "Feel free to extend this method to cover multiple interfaces.", clazz.getName(), interfaces);
+        return new GenericSupertypeTypeArgumentCreator(clazz, "interface", getOnlyElement(interfaces));
+    }
+
+    public static GenericMemberTypeArgumentCreator genericFieldType(Class<?> clazz, String fieldName) {
+        return new GenericMemberTypeArgumentCreator(
+                clazz,
+                fieldName,
+                "type",
+                getField(clazz, fieldName).getGenericType());
+    }
+
+    public static GenericMemberTypeArgumentCreator genericMethodReturnType(Class<?> clazz, String methodName, Class<?>... parameterTypes) {
+        return new GenericMemberTypeArgumentCreator(
+                clazz,
+                methodName,
+                "return type",
+                getMethod(clazz, methodName, parameterTypes).getGenericReturnType());
     }
 
     public static AnnotationDependencyCreator annotatedClass(Class<?> clazz) {
@@ -96,33 +128,80 @@ public class ExpectedDependency implements ExpectedRelation {
     public static class TypeParameterCreator {
         private final Class<?> clazz;
         private final String typeParameterName;
+        private final String originName;
 
         private TypeParameterCreator(Class<?> clazz, String typeParameterName) {
+            this(clazz, clazz.getName(), typeParameterName);
+        }
+
+        private TypeParameterCreator(Class<?> clazz, String originName, String typeParameterName) {
             this.clazz = clazz;
             this.typeParameterName = typeParameterName;
+            this.originName = originName;
         }
 
         public ExpectedDependency dependingOn(Class<?> typeParameterDependency) {
             return new ExpectedDependency(clazz, typeParameterDependency,
-                    getDependencyPattern(clazz.getName(), "has type parameter '" + typeParameterName + "' depending on", typeParameterDependency.getName(), 0));
+                    getDependencyPattern(originName, "has type parameter '" + typeParameterName + "' depending on", typeParameterDependency.getName(), 0));
         }
     }
 
-    public static class GenericSuperclassTypeArgumentCreator {
+    public static class GenericSupertypeTypeArgumentCreator {
         private final Class<?> childClass;
-        private final Class<?> genericSuperclassErasure;
+        private final Type genericSupertype;
+        private final String genericTypeDescription;
 
-        private GenericSuperclassTypeArgumentCreator(Class<?> childClass, Class<?> genericSuperclassErasure) {
+        private GenericSupertypeTypeArgumentCreator(Class<?> childClass, String genericTypeDescription, Type genericSupertype) {
             this.childClass = childClass;
-            this.genericSuperclassErasure = genericSuperclassErasure;
+            this.genericSupertype = genericSupertype;
+            this.genericTypeDescription = genericTypeDescription;
         }
 
         public ExpectedDependency dependingOn(Class<?> superclassTypeArgumentDependency) {
             return new ExpectedDependency(childClass, superclassTypeArgumentDependency,
                     getDependencyPattern(childClass.getName(),
-                            "has generic superclass <" + genericSuperclassErasure.getName() + "> with type argument depending on",
+                            "has generic " + genericTypeDescription + " <" + quote(genericSupertype.getTypeName()) + "> with type argument depending on",
                             superclassTypeArgumentDependency.getName(),
                             0));
+        }
+    }
+
+    public static class GenericMemberTypeArgumentCreator {
+        private final Class<?> owner;
+        private final String memberName;
+        private final String genericTypeDescription;
+        private final Type genericType;
+
+        private GenericMemberTypeArgumentCreator(Class<?> owner, String memberName, String genericTypeDescription, Type genericType) {
+            this.owner = owner;
+            this.memberName = memberName;
+            this.genericTypeDescription = genericTypeDescription;
+            this.genericType = genericType;
+        }
+
+        public ExpectedDependency dependingOn(Class<?> typeArgumentDependency) {
+            return new ExpectedDependency(owner, typeArgumentDependency,
+                    getDependencyPattern(owner.getName() + "." + memberName,
+                            "has generic " + genericTypeDescription +
+                                    " <" + quote(genericType.getTypeName()) + "> with type argument depending on",
+                            typeArgumentDependency.getName(),
+                            0));
+        }
+    }
+
+    private static Field getField(Class<?> owner, String fieldName) {
+        try {
+            return owner.getDeclaredField(fieldName);
+        } catch (NoSuchFieldException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static Method getMethod(Class<?> owner, String methodName, Class<?>... parameterTypes) {
+        try {
+            return owner.getDeclaredMethod(methodName, parameterTypes);
+        } catch (NoSuchMethodException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -178,6 +257,10 @@ public class ExpectedDependency implements ExpectedRelation {
         public ExpectedDependency withReturnType(Class<?> returnType) {
             String dependencyPattern = getDependencyPattern(getOriginName(), "return type", returnType.getName(), 0);
             return new ExpectedDependency(owner, returnType, dependencyPattern);
+        }
+
+        public TypeParameterCreator withTypeParameter(String typeParameterName) {
+            return new TypeParameterCreator(owner, getOriginName(), typeParameterName);
         }
 
         public ExpectedDependency dependingOnComponentType(Class<?> componentType) {

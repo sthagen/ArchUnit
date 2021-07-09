@@ -145,8 +145,23 @@ public class Dependency implements HasDescription, Comparable<Dependency>, HasSo
     }
 
     static Set<Dependency> tryCreateFromGenericSuperclassTypeArguments(JavaClass originClass, JavaType superclass, JavaClass typeArgumentDependency) {
-        String dependencyType = "has generic superclass " + bracketFormat(superclass.getName()) + " with type argument depending on";
-        return tryCreateDependency(originClass, originClass.getDescription(), dependencyType, typeArgumentDependency, originClass.getSourceCodeLocation());
+        return tryCreateDependency(originClass, genericDependencyType("superclass", superclass), typeArgumentDependency);
+    }
+
+    static Set<Dependency> tryCreateFromGenericInterfaceTypeArgument(JavaClass originClass, JavaType genericInterface, JavaClass typeArgumentDependency) {
+        return tryCreateDependency(originClass, genericDependencyType("interface", genericInterface), typeArgumentDependency);
+    }
+
+    static Set<Dependency> tryCreateFromGenericFieldTypeArgument(JavaField origin, JavaClass typeArgumentDependency) {
+        return tryCreateDependency(origin, genericDependencyType("type", origin.getType()), typeArgumentDependency);
+    }
+
+    static Set<Dependency> tryCreateFromGenericMethodReturnTypeArgument(JavaMethod origin, JavaClass typeArgumentDependency) {
+        return tryCreateDependency(origin, genericDependencyType("return type", origin.getReturnType()), typeArgumentDependency);
+    }
+
+    private static String genericDependencyType(String genericTypeDescription, JavaType genericType) {
+        return "has generic " + genericTypeDescription + " " + bracketFormat(genericType.getName()) + " with type argument depending on";
     }
 
     private static Origin findSuitableOrigin(Object dependencyCause, Object originCandidate) {
@@ -161,8 +176,13 @@ public class Dependency implements HasDescription, Comparable<Dependency>, HasSo
         throw new IllegalStateException("Could not find suitable dependency origin for " + dependencyCause);
     }
 
+    private static Set<Dependency> tryCreateDependency(JavaClass origin, String dependencyType, JavaClass targetClass) {
+        return tryCreateDependency(origin, origin.getDescription(), dependencyType, targetClass, origin.getSourceCodeLocation());
+    }
+
     private static <T extends HasOwner<JavaClass> & HasDescription> Set<Dependency> tryCreateDependency(
             T origin, String dependencyType, JavaClass targetClass) {
+
         return tryCreateDependency(origin, dependencyType, targetClass, origin.getOwner().getSourceCodeLocation());
     }
 

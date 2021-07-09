@@ -28,6 +28,8 @@ public interface ImportContext {
 
     Optional<JavaType> createGenericSuperclass(JavaClass owner);
 
+    Optional<Set<JavaType>> createGenericInterfaces(JavaClass owner);
+
     Set<JavaClass> createInterfaces(JavaClass owner);
 
     List<JavaTypeVariable<JavaClass>> createTypeParameters(JavaClass owner);
@@ -45,6 +47,8 @@ public interface ImportContext {
     Map<String, JavaAnnotation<JavaMember>> createAnnotations(JavaMember owner);
 
     Optional<JavaClass> createEnclosingClass(JavaClass owner);
+
+    Optional<JavaCodeUnit> createEnclosingCodeUnit(JavaClass owner);
 
     Set<JavaFieldAccess> createFieldAccessesFor(JavaCodeUnit codeUnit);
 

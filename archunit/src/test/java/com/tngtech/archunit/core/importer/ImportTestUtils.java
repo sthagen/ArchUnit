@@ -41,6 +41,7 @@ import com.tngtech.archunit.core.domain.JavaStaticInitializer;
 import com.tngtech.archunit.core.domain.JavaType;
 import com.tngtech.archunit.core.domain.JavaTypeVariable;
 import com.tngtech.archunit.core.importer.DomainBuilders.JavaMethodCallBuilder;
+import com.tngtech.archunit.core.importer.DomainBuilders.JavaTypeCreationProcess;
 import org.objectweb.asm.Type;
 
 import static com.tngtech.archunit.core.domain.JavaConstructor.CONSTRUCTOR_NAME;
@@ -66,7 +67,7 @@ public class ImportTestUtils {
                     .withName(field.getName())
                     .withDescriptor(Type.getDescriptor(field.getType()))
                     .withModifiers(JavaModifier.getModifiersForField(field.getModifiers()))
-                    .withType(JavaClassDescriptor.From.name(field.getType().getName())));
+                    .withType(Optional.<JavaTypeCreationProcess<JavaField>>absent(), JavaClassDescriptor.From.name(field.getType().getName())));
         }
         return fieldBuilders;
     }
@@ -75,7 +76,9 @@ public class ImportTestUtils {
         final Set<DomainBuilders.BuilderWithBuildParameter<JavaClass, JavaMethod>> methodBuilders = new HashSet<>();
         for (Method method : inputClass.getDeclaredMethods()) {
             methodBuilders.add(new DomainBuilders.JavaMethodBuilder()
-                    .withReturnType(JavaClassDescriptor.From.name(method.getReturnType().getName()))
+                    .withReturnType(
+                            Optional.<JavaTypeCreationProcess<JavaCodeUnit>>absent(),
+                            JavaClassDescriptor.From.name(method.getReturnType().getName()))
                     .withParameters(typesFrom(method.getParameterTypes()))
                     .withName(method.getName())
                     .withDescriptor(Type.getMethodDescriptor(method))
@@ -89,7 +92,9 @@ public class ImportTestUtils {
         final Set<DomainBuilders.BuilderWithBuildParameter<JavaClass, JavaConstructor>> constructorBuilders = new HashSet<>();
         for (Constructor<?> constructor : inputClass.getDeclaredConstructors()) {
             constructorBuilders.add(new DomainBuilders.JavaConstructorBuilder()
-                    .withReturnType(JavaClassDescriptor.From.name(void.class.getName()))
+                    .withReturnType(
+                            Optional.<JavaTypeCreationProcess<JavaCodeUnit>>absent(),
+                            JavaClassDescriptor.From.name(void.class.getName()))
                     .withParameters(typesFrom(constructor.getParameterTypes()))
                     .withName(CONSTRUCTOR_NAME)
                     .withDescriptor(Type.getConstructorDescriptor(constructor))
@@ -343,6 +348,11 @@ public class ImportTestUtils {
         }
 
         @Override
+        public Optional<Set<JavaType>> createGenericInterfaces(JavaClass owner) {
+            return Optional.absent();
+        }
+
+        @Override
         public Set<JavaClass> createInterfaces(JavaClass owner) {
             return Collections.emptySet();
         }
@@ -384,6 +394,11 @@ public class ImportTestUtils {
 
         @Override
         public Optional<JavaClass> createEnclosingClass(JavaClass owner) {
+            return Optional.absent();
+        }
+
+        @Override
+        public Optional<JavaCodeUnit> createEnclosingCodeUnit(JavaClass owner) {
             return Optional.absent();
         }
 

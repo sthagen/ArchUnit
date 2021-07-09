@@ -24,7 +24,7 @@ import com.tngtech.archunit.base.Optional;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaFieldAccess.AccessType;
-import com.tngtech.archunit.core.importer.DomainBuilders.TypeParametersBuilder;
+import com.tngtech.archunit.core.importer.DomainBuilders.JavaClassTypeParametersBuilder;
 import com.tngtech.archunit.core.importer.JavaClassProcessor.AccessHandler;
 import com.tngtech.archunit.core.importer.JavaClassProcessor.DeclarationHandler;
 import com.tngtech.archunit.core.importer.RawAccessRecord.CodeUnit;
@@ -36,12 +36,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static com.tngtech.archunit.core.domain.JavaConstructor.CONSTRUCTOR_NAME;
-import static org.objectweb.asm.Opcodes.ASM7;
+import static org.objectweb.asm.Opcodes.ASM9;
 
 class ClassFileProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(ClassFileProcessor.class);
 
-    static final int ASM_API_VERSION = ASM7;
+    static final int ASM_API_VERSION = ASM9;
 
     private final boolean md5InClassSourcesEnabled = ArchConfiguration.get().md5InClassSourcesEnabled();
     private final ClassResolver.Factory classResolverFactory = new ClassResolver.Factory();
@@ -86,13 +86,18 @@ class ClassFileProcessor {
         }
 
         @Override
-        public void onDeclaredTypeParameters(TypeParametersBuilder typeParametersBuilder) {
+        public void onDeclaredTypeParameters(JavaClassTypeParametersBuilder typeParametersBuilder) {
             importRecord.addTypeParameters(ownerName, typeParametersBuilder);
         }
 
         @Override
         public void onGenericSuperclass(DomainBuilders.JavaParameterizedTypeBuilder<JavaClass> genericSuperclassBuilder) {
             importRecord.addGenericSuperclass(ownerName, genericSuperclassBuilder);
+        }
+
+        @Override
+        public void onGenericInterfaces(Set<DomainBuilders.JavaParameterizedTypeBuilder<JavaClass>> genericInterfaceBuilders) {
+            importRecord.addGenericInterfaces(ownerName, genericInterfaceBuilders);
         }
 
         @Override
@@ -133,6 +138,11 @@ class ClassFileProcessor {
         @Override
         public void registerEnclosingClass(String ownerName, String enclosingClassName) {
             importRecord.setEnclosingClass(ownerName, enclosingClassName);
+        }
+
+        @Override
+        public void registerEnclosingCodeUnit(String ownerName, CodeUnit enclosingCodeUnit) {
+            importRecord.setEnclosingCodeUnit(ownerName, enclosingCodeUnit);
         }
     }
 

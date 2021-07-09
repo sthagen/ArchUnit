@@ -26,12 +26,14 @@ import java.util.Set;
 import com.google.common.base.Joiner;
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
+import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.tngtech.archunit.PublicAPI;
 import com.tngtech.archunit.base.ArchUnitException.InvalidSyntaxUsageException;
 import com.tngtech.archunit.base.ChainableFunction;
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.base.Function;
 import com.tngtech.archunit.base.Optional;
 import com.tngtech.archunit.base.PackageMatcher;
 import com.tngtech.archunit.core.MayResolveTypesViaReflection;
@@ -41,6 +43,7 @@ import com.tngtech.archunit.core.domain.properties.HasAnnotations;
 import com.tngtech.archunit.core.domain.properties.HasModifiers;
 import com.tngtech.archunit.core.domain.properties.HasName;
 import com.tngtech.archunit.core.domain.properties.HasSourceCodeLocation;
+import com.tngtech.archunit.core.domain.properties.HasTypeParameters;
 import com.tngtech.archunit.core.importer.DomainBuilders.JavaClassBuilder;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -50,7 +53,14 @@ import static com.tngtech.archunit.PublicAPI.Usage.ACCESS;
 import static com.tngtech.archunit.base.ClassLoaders.getCurrentClassLoader;
 import static com.tngtech.archunit.base.DescribedPredicate.equalTo;
 import static com.tngtech.archunit.base.DescribedPredicate.not;
+import static com.tngtech.archunit.base.Guava.toGuava;
+import static com.tngtech.archunit.core.domain.JavaClass.Functions.GET_CODE_UNITS;
+import static com.tngtech.archunit.core.domain.JavaClass.Functions.GET_CONSTRUCTORS;
+import static com.tngtech.archunit.core.domain.JavaClass.Functions.GET_FIELDS;
+import static com.tngtech.archunit.core.domain.JavaClass.Functions.GET_MEMBERS;
+import static com.tngtech.archunit.core.domain.JavaClass.Functions.GET_METHODS;
 import static com.tngtech.archunit.core.domain.JavaClass.Functions.GET_SIMPLE_NAME;
+import static com.tngtech.archunit.core.domain.JavaClass.Functions.GET_STATIC_INITIALIZER;
 import static com.tngtech.archunit.core.domain.JavaModifier.ENUM;
 import static com.tngtech.archunit.core.domain.JavaType.Functions.TO_ERASURE;
 import static com.tngtech.archunit.core.domain.properties.CanBeAnnotated.Utils.toAnnotationOfType;
@@ -59,7 +69,9 @@ import static com.tngtech.archunit.core.domain.properties.HasType.Functions.GET_
 import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 
-public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<JavaClass>, HasModifiers, HasSourceCodeLocation {
+public class JavaClass
+        implements JavaType, HasName.AndFullName, HasTypeParameters<JavaClass>, HasAnnotations<JavaClass>, HasModifiers, HasSourceCodeLocation {
+
     private final Optional<Source> source;
     private final SourceCodeLocation sourceCodeLocation;
     private final JavaClassDescriptor descriptor;
@@ -67,6 +79,7 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
     private final boolean isInterface;
     private final boolean isEnum;
     private final boolean isAnnotation;
+    private final boolean isRecord;
     private final boolean isAnonymousClass;
     private final boolean isMemberClass;
     private final Set<JavaModifier> modifiers;
@@ -86,16 +99,16 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
             return result.build();
         }
     });
-    private final Set<JavaClass> interfaces = new HashSet<>();
-    private final Supplier<Set<JavaClass>> allInterfaces = Suppliers.memoize(new Supplier<Set<JavaClass>>() {
+    private Interfaces interfaces = Interfaces.EMPTY;
+    private final Supplier<Set<JavaClass>> allRawInterfaces = Suppliers.memoize(new Supplier<Set<JavaClass>>() {
         @Override
         public Set<JavaClass> get() {
             ImmutableSet.Builder<JavaClass> result = ImmutableSet.builder();
-            for (JavaClass i : interfaces) {
+            for (JavaClass i : interfaces.getRaw()) {
                 result.add(i);
-                result.addAll(i.getAllInterfaces());
+                result.addAll(i.getAllRawInterfaces());
             }
-            result.addAll(superclass.getAllInterfaces());
+            result.addAll(superclass.getAllRawInterfaces());
             return result.build();
         }
     });
@@ -120,7 +133,7 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
             return result;
         }
     });
-    private Optional<JavaClass> enclosingClass = Optional.absent();
+    private EnclosingDeclaration enclosingDeclaration = EnclosingDeclaration.ABSENT;
     private Optional<JavaClass> componentType = Optional.absent();
     private Map<String, JavaAnnotation<JavaClass>> annotations = emptyMap();
     private JavaClassDependencies javaClassDependencies = new JavaClassDependencies(this);  // just for stubs; will be overwritten for imported classes
@@ -133,6 +146,7 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
         isInterface = builder.isInterface();
         isEnum = builder.isEnum();
         isAnnotation = builder.isAnnotation();
+        isRecord = builder.isRecord();
         isAnonymousClass = builder.isAnonymousClass();
         isMemberClass = builder.isMemberClass();
         modifiers = checkNotNull(builder.getModifiers());
@@ -216,6 +230,20 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
     @PublicAPI(usage = ACCESS)
     public boolean isAnnotation() {
         return isAnnotation;
+    }
+
+    /**
+     * Returns whether this class is a <b>record</b>
+     * according to the Java Language Specification.
+     * <p>
+     * Records were added as preview feature with JDK 14/15
+     * and were released as regular feature with JDK 16.
+     * <p>
+     * See also <a href="https://openjdk.java.net/jeps/395">JEP 395: Records</a>
+     */
+    @PublicAPI(usage = ACCESS)
+    public boolean isRecord() {
+        return isRecord;
     }
 
     @PublicAPI(usage = ACCESS)
@@ -358,7 +386,7 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
      */
     @PublicAPI(usage = ACCESS)
     public boolean isNestedClass() {
-        return enclosingClass.isPresent();
+        return enclosingDeclaration.isPresent();
     }
 
     /**
@@ -568,7 +596,7 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
     /**
      * @param type A given annotation type to match {@link JavaAnnotation JavaAnnotations} against
      * @return An {@link Annotation} of the given annotation type
-     * @throws IllegalArgumentException if the class is note annotated with the given type
+     * @throws IllegalArgumentException if the class is not annotated with the given type
      * @see #isAnnotatedWith(Class)
      * @see #tryGetAnnotationOfType(Class)
      */
@@ -616,6 +644,7 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
         return Optional.fromNullable(annotations.get(typeName));
     }
 
+    @Override
     @PublicAPI(usage = ACCESS)
     public List<JavaTypeVariable<JavaClass>> getTypeParameters() {
         return typeParameters;
@@ -692,13 +721,18 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
     }
 
     @PublicAPI(usage = ACCESS)
-    public Set<JavaClass> getInterfaces() {
-        return interfaces;
+    public Set<JavaType> getInterfaces() {
+        return interfaces.get();
     }
 
     @PublicAPI(usage = ACCESS)
-    public Set<JavaClass> getAllInterfaces() {
-        return allInterfaces.get();
+    public Set<JavaClass> getRawInterfaces() {
+        return interfaces.getRaw();
+    }
+
+    @PublicAPI(usage = ACCESS)
+    public Set<JavaClass> getAllRawInterfaces() {
+        return allRawInterfaces.get();
     }
 
     /**
@@ -714,13 +748,57 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
         return ImmutableSet.<JavaClass>builder()
                 .add(this)
                 .addAll(getAllRawSuperclasses())
-                .addAll(getAllInterfaces())
+                .addAll(getAllRawInterfaces())
                 .build();
     }
 
+    /**
+     * Returns the enclosing class if this class is nested within another class.
+     * Otherwise {@link Optional#absent()}.<br><br>
+     * Take for example
+     * <pre><code>
+     * class OuterClass {
+     *     class InnerClass{
+     *     }
+     * }
+     * </code></pre>
+     * Then {@code InnerClass.}{@link #getEnclosingClass()} would return {@code Optional.of(OuterClass)}.
+     * While {@code OuterClass.}{@link #getEnclosingClass()} would return {@link Optional#absent()}.
+     */
     @PublicAPI(usage = ACCESS)
     public Optional<JavaClass> getEnclosingClass() {
-        return enclosingClass;
+        return enclosingDeclaration.getEnclosingClass();
+    }
+
+    /**
+     * Returns the enclosing {@link JavaCodeUnit} if this class is declared within the context of a {@link JavaCodeUnit},
+     * e.g. a method or a constructor. Otherwise {@link Optional#absent()}.<br><br>
+     * Take for example
+     * <pre><code>
+     * class OuterClass {
+     *     OuterClass() {
+     *         // creates a new anonymous class within the scope of the constructor
+     *         new Serializable() {};
+     *     }
+     *
+     *     void someMethod() {
+     *         // creates a new local class within the scope of the method
+     *         class LocalClass {}
+     *     }
+     *
+     *     class InnerClass {}
+     * }
+     * </code></pre>
+     * Then {@code anonymousSerializable.}{@link #getEnclosingCodeUnit()} would return the {@link JavaConstructor}
+     * {@code OuterClass()} and {@code LocalClass.}{@link #getEnclosingCodeUnit()} would return the {@link JavaMethod}
+     * {@code void someMethod()}.<br>
+     * On the other hand {@code OuterClass.}{@link #getEnclosingCodeUnit()} or
+     * {@code InnerClass.}{@link #getEnclosingCodeUnit()} would return {@link Optional#absent()}, since they are
+     * not defined within the context of a {@link JavaCodeUnit}.
+     */
+    @PublicAPI(usage = ACCESS)
+    public Optional<JavaCodeUnit> getEnclosingCodeUnit() {
+        return enclosingDeclaration.getEnclosingCodeUnit();
     }
 
     @PublicAPI(usage = ACCESS)
@@ -808,11 +886,29 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
     }
 
     /**
+     * Same as {@link #getCodeUnitWithParameterTypes(String, List)}, but will return {@link Optional#absent()}
+     * if there is no such {@link JavaCodeUnit}.
+     */
+    @PublicAPI(usage = ACCESS)
+    public Optional<JavaCodeUnit> tryGetCodeUnitWithParameterTypes(String name, List<Class<?>> parameters) {
+        return tryGetCodeUnitWithParameterTypeNames(name, namesOf(parameters));
+    }
+
+    /**
      * @see #getCodeUnitWithParameterTypeNames(String, String...)
      */
     @PublicAPI(usage = ACCESS)
     public JavaCodeUnit getCodeUnitWithParameterTypeNames(String name, List<String> parameters) {
         return members.getCodeUnitWithParameterTypeNames(name, parameters);
+    }
+
+    /**
+     * Same as {@link #getCodeUnitWithParameterTypeNames(String, List)}, but will return {@link Optional#absent()}
+     * if there is no such {@link JavaCodeUnit}.
+     */
+    @PublicAPI(usage = ACCESS)
+    public Optional<JavaCodeUnit> tryGetCodeUnitWithParameterTypeNames(String name, List<String> parameters) {
+        return members.tryGetCodeUnitWithParameterTypeNames(name, parameters);
     }
 
     /**
@@ -1175,7 +1271,7 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
     @PublicAPI(usage = ACCESS)
     public boolean isAssignableTo(DescribedPredicate<? super JavaClass> predicate) {
         List<JavaClass> possibleTargets = ImmutableList.<JavaClass>builder()
-                .addAll(getClassHierarchy()).addAll(getAllInterfaces()).build();
+                .addAll(getClassHierarchy()).addAll(getAllRawInterfaces()).build();
 
         return anyMatches(possibleTargets, predicate);
     }
@@ -1217,15 +1313,23 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
     }
 
     private void completeInterfacesFrom(ImportContext context) {
-        interfaces.addAll(context.createInterfaces(this));
-        for (JavaClass i : interfaces) {
+        Set<JavaClass> rawInterfaces = context.createInterfaces(this);
+        for (JavaClass i : rawInterfaces) {
             i.subclasses.add(this);
         }
+        this.interfaces = this.interfaces.withRawTypes(rawInterfaces);
     }
 
-    void completeEnclosingClassFrom(ImportContext context) {
-        enclosingClass = context.createEnclosingClass(this);
-        completionProcess.markEnclosingClassComplete();
+    void completeEnclosingDeclarationFrom(ImportContext context) {
+        enclosingDeclaration = createEnclosingDeclaration(context);
+        completionProcess.markEnclosingDeclarationComplete();
+    }
+
+    private EnclosingDeclaration createEnclosingDeclaration(ImportContext context) {
+        Optional<JavaCodeUnit> enclosingCodeUnit = context.createEnclosingCodeUnit(this);
+        return enclosingCodeUnit.isPresent()
+                ? EnclosingDeclaration.ofCodeUnit(enclosingCodeUnit.get())
+                : EnclosingDeclaration.ofClass(context.createEnclosingClass(this));
     }
 
     void completeTypeParametersFrom(ImportContext context) {
@@ -1239,6 +1343,14 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
             superclass = superclass.withGenericType(genericSuperclass.get());
         }
         completionProcess.markGenericSuperclassComplete();
+    }
+
+    void completeGenericInterfacesFrom(ImportContext context) {
+        Optional<Set<JavaType>> genericInterfaces = context.createGenericInterfaces(this);
+        if (genericInterfaces.isPresent()) {
+            interfaces = interfaces.withGenericTypes(genericInterfaces.get());
+        }
+        completionProcess.markGenericInterfacesComplete();
     }
 
     void completeMembers(final ImportContext context) {
@@ -1325,8 +1437,8 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
             return type.or(rawType);
         }
 
-        Set<JavaClass> getAllInterfaces() {
-            return rawType.isPresent() ? rawType.get().getAllInterfaces() : Collections.<JavaClass>emptySet();
+        Set<JavaClass> getAllRawInterfaces() {
+            return rawType.isPresent() ? rawType.get().getAllRawInterfaces() : Collections.<JavaClass>emptySet();
         }
 
         Superclass withRawType(JavaClass newRawType) {
@@ -1338,11 +1450,74 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
         }
     }
 
+    private static class Interfaces {
+        static final Interfaces EMPTY = new Interfaces(Collections.<JavaType>emptySet());
+
+        private final Set<JavaClass> rawTypes;
+        private final Set<JavaType> types;
+
+        private Interfaces(Set<JavaType> types) {
+            this.rawTypes = FluentIterable.from(types).transform(toGuava(TO_ERASURE)).toSet();
+            this.types = ImmutableSet.copyOf(types);
+        }
+
+        Set<JavaClass> getRaw() {
+            return rawTypes;
+        }
+
+        Set<JavaType> get() {
+            return types;
+        }
+
+        // Set is covariant, so the cast is safe
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        Interfaces withRawTypes(Set<JavaClass> rawTypes) {
+            return new Interfaces((Set) rawTypes);
+        }
+
+        Interfaces withGenericTypes(Set<JavaType> genericTypes) {
+            return new Interfaces(genericTypes);
+        }
+    }
+
+    private static class EnclosingDeclaration {
+        static final EnclosingDeclaration ABSENT = new EnclosingDeclaration(Optional.<JavaCodeUnit>absent(), Optional.<JavaClass>absent());
+
+        private final Optional<JavaCodeUnit> enclosingCodeUnit;
+        private final Optional<JavaClass> enclosingClass;
+
+        private EnclosingDeclaration(Optional<JavaCodeUnit> enclosingCodeUnit, Optional<JavaClass> enclosingClass) {
+            this.enclosingCodeUnit = checkNotNull(enclosingCodeUnit);
+            this.enclosingClass = checkNotNull(enclosingClass);
+        }
+
+        boolean isPresent() {
+            return enclosingClass.isPresent();
+        }
+
+        Optional<JavaClass> getEnclosingClass() {
+            return enclosingClass;
+        }
+
+        Optional<JavaCodeUnit> getEnclosingCodeUnit() {
+            return enclosingCodeUnit;
+        }
+
+        static EnclosingDeclaration ofCodeUnit(JavaCodeUnit codeUnit) {
+            return new EnclosingDeclaration(Optional.of(codeUnit), Optional.of(codeUnit.getOwner()));
+        }
+
+        static EnclosingDeclaration ofClass(Optional<JavaClass> clazz) {
+            return new EnclosingDeclaration(Optional.<JavaCodeUnit>absent(), clazz);
+        }
+    }
+
     private static class CompletionProcess {
         private boolean classHierarchyComplete = false;
-        private boolean enclosingClassComplete = false;
+        private boolean enclosingDeclarationComplete = false;
         private boolean typeParametersComplete = false;
         private boolean genericSuperclassComplete = false;
+        private boolean genericInterfacesComplete = false;
         private boolean membersComplete = false;
         private boolean annotationsComplete = false;
         private boolean dependenciesComplete = false;
@@ -1352,9 +1527,10 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
 
         boolean hasFinished() {
             return classHierarchyComplete
-                    && enclosingClassComplete
+                    && enclosingDeclarationComplete
                     && typeParametersComplete
                     && genericSuperclassComplete
+                    && genericInterfacesComplete
                     && membersComplete
                     && annotationsComplete
                     && dependenciesComplete;
@@ -1364,8 +1540,8 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
             this.classHierarchyComplete = true;
         }
 
-        public void markEnclosingClassComplete() {
-            this.enclosingClassComplete = true;
+        public void markEnclosingDeclarationComplete() {
+            this.enclosingDeclarationComplete = true;
         }
 
         public void markTypeParametersComplete() {
@@ -1374,6 +1550,10 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
 
         public void markGenericSuperclassComplete() {
             this.genericSuperclassComplete = true;
+        }
+
+        public void markGenericInterfacesComplete() {
+            this.genericInterfacesComplete = true;
         }
 
         public void markMembersComplete() {
@@ -1464,6 +1644,15 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
                 };
 
         @PublicAPI(usage = ACCESS)
+        public static final ChainableFunction<JavaClass, Optional<JavaStaticInitializer>> GET_STATIC_INITIALIZER =
+                new ChainableFunction<JavaClass, Optional<JavaStaticInitializer>>() {
+                    @Override
+                    public Optional<JavaStaticInitializer> apply(JavaClass input) {
+                        return input.getStaticInitializer();
+                    }
+                };
+
+        @PublicAPI(usage = ACCESS)
         public static final ChainableFunction<JavaClass, Set<JavaFieldAccess>> GET_FIELD_ACCESSES_FROM_SELF =
                 new ChainableFunction<JavaClass, Set<JavaFieldAccess>>() {
                     @Override
@@ -1518,6 +1707,15 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
                 };
 
         @PublicAPI(usage = ACCESS)
+        public static final ChainableFunction<JavaClass, Set<Dependency>> GET_TRANSITIVE_DEPENDENCIES_FROM_SELF =
+                new ChainableFunction<JavaClass, Set<Dependency>>() {
+                    @Override
+                    public Set<Dependency> apply(JavaClass input) {
+                        return input.getTransitiveDependenciesFromSelf();
+                    }
+                };
+
+        @PublicAPI(usage = ACCESS)
         public static final ChainableFunction<JavaClass, Set<JavaAccess<?>>> GET_ACCESSES_TO_SELF =
                 new ChainableFunction<JavaClass, Set<JavaAccess<?>>>() {
                     @Override
@@ -1561,6 +1759,14 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
             @Override
             public boolean apply(JavaClass input) {
                 return input.isAnnotation();
+            }
+        };
+
+        @PublicAPI(usage = ACCESS)
+        public static final DescribedPredicate<JavaClass> RECORDS = new DescribedPredicate<JavaClass>("records") {
+            @Override
+            public boolean apply(JavaClass input) {
+                return input.isRecord();
             }
         };
 
@@ -1828,6 +2034,85 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
             return new BelongToAnyOfPredicate(classes);
         }
 
+        /**
+         * A predicate to determine if a {@link JavaClass} contains one or more {@link JavaMember members} matching the supplied predicate.
+         *
+         * @param predicate The predicate to check against the {@link JavaClass classes'} members.
+         * @return A {@link DescribedPredicate} returning true, if and only if the tested {@link JavaClass} contains at least
+         * one member matching the given predicate.
+         */
+        @PublicAPI(usage = ACCESS)
+        public static DescribedPredicate<JavaClass> containAnyMembersThat(DescribedPredicate<? super JavaMember> predicate) {
+            return new ContainAnyMembersThatPredicate<>("members", GET_MEMBERS, predicate);
+        }
+
+        /**
+         * A predicate to determine if a {@link JavaClass} contains one or more {@link JavaField fields} matching the supplied predicate.
+         *
+         * @param predicate The predicate to check against the {@link JavaClass classes'} fields.
+         * @return A {@link DescribedPredicate} returning true, if and only if the tested {@link JavaClass} contains at least
+         * one field matching the given predicate.
+         */
+        @PublicAPI(usage = ACCESS)
+        public static DescribedPredicate<JavaClass> containAnyFieldsThat(DescribedPredicate<? super JavaField> predicate) {
+            return new ContainAnyMembersThatPredicate<>("fields", GET_FIELDS, predicate);
+        }
+
+        /**
+         * A predicate to determine if a {@link JavaClass} contains one or more {@link JavaCodeUnit code units} matching the supplied predicate.
+         *
+         * @param predicate The predicate to check against the {@link JavaClass classes'} code units.
+         * @return A {@link DescribedPredicate} returning true, if and only if the tested {@link JavaClass} contains at least
+         * one code unit matching the given predicate.
+         */
+        @PublicAPI(usage = ACCESS)
+        public static DescribedPredicate<JavaClass> containAnyCodeUnitsThat(DescribedPredicate<? super JavaCodeUnit> predicate) {
+            return new ContainAnyMembersThatPredicate<>("code units", GET_CODE_UNITS, predicate);
+        }
+
+        /**
+         * A predicate to determine if a {@link JavaClass} contains one or more {@link JavaMethod methods} matching the supplied predicate.
+         *
+         * @param predicate The predicate to check against the {@link JavaClass classes'} methods.
+         * @return A {@link DescribedPredicate} returning true, if and only if the tested {@link JavaClass} contains at least
+         * one method matching the given predicate.
+         */
+        @PublicAPI(usage = ACCESS)
+        public static DescribedPredicate<JavaClass> containAnyMethodsThat(DescribedPredicate<? super JavaMethod> predicate) {
+            return new ContainAnyMembersThatPredicate<>("methods", GET_METHODS, predicate);
+        }
+
+        /**
+         * A predicate to determine if a {@link JavaClass} contains one or more {@link JavaConstructor constructors} matching the supplied predicate.
+         *
+         * @param predicate The predicate to check against the {@link JavaClass classes'} constructors.
+         * @return A {@link DescribedPredicate} returning true, if and only if the tested {@link JavaClass} contains at least
+         * one constructor matching the given predicate.
+         */
+        @PublicAPI(usage = ACCESS)
+        public static DescribedPredicate<JavaClass> containAnyConstructorsThat(DescribedPredicate<? super JavaConstructor> predicate) {
+            return new ContainAnyMembersThatPredicate<>("constructors", GET_CONSTRUCTORS, predicate);
+        }
+
+        /**
+         * A predicate to determine if a {@link JavaClass} contains one or more {@link JavaConstructor constructors} matching the supplied predicate.
+         *
+         * @param predicate The predicate to check against the {@link JavaClass classes'} constructors.
+         * @return A {@link DescribedPredicate} returning true, if and only if the tested {@link JavaClass} contains at least
+         * one constructor matching the given predicate.
+         */
+        @PublicAPI(usage = ACCESS)
+        public static DescribedPredicate<JavaClass> containAnyStaticInitializersThat(DescribedPredicate<? super JavaStaticInitializer> predicate) {
+            return new ContainAnyMembersThatPredicate<>("static initializers", GET_STATIC_INITIALIZER.then(AS_SET), predicate);
+        }
+
+        private static final Function<Optional<JavaStaticInitializer>, Set<JavaStaticInitializer>> AS_SET = new Function<Optional<JavaStaticInitializer>, Set<JavaStaticInitializer>>() {
+            @Override
+            public Set<JavaStaticInitializer> apply(Optional<JavaStaticInitializer> input) {
+                return input.asSet();
+            }
+        };
+
         private static class BelongToAnyOfPredicate extends DescribedPredicate<JavaClass> {
             private final Class<?>[] classes;
 
@@ -1955,6 +2240,27 @@ public class JavaClass implements JavaType, HasName.AndFullName, HasAnnotations<
             @Override
             public boolean apply(JavaClass input) {
                 return input.isEquivalentTo(clazz);
+            }
+        }
+
+        private static class ContainAnyMembersThatPredicate<T extends JavaMember> extends DescribedPredicate<JavaClass> {
+            private final Function<JavaClass, Set<T>> getMembers;
+            private final DescribedPredicate<? super T> predicate;
+
+            ContainAnyMembersThatPredicate(String memberDescription, Function<JavaClass, Set<T>> getMembers, DescribedPredicate<? super T> predicate) {
+                super("contain any " + memberDescription + " that " + predicate.getDescription());
+                this.getMembers = getMembers;
+                this.predicate = predicate;
+            }
+
+            @Override
+            public boolean apply(JavaClass input) {
+                for (T member : getMembers.apply(input)) {
+                    if (predicate.apply(member)) {
+                        return true;
+                    }
+                }
+                return false;
             }
         }
     }

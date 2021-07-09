@@ -12,6 +12,7 @@ import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Iterables;
 import com.tngtech.archunit.base.HasDescription;
 import com.tngtech.archunit.core.domain.Dependency;
+import com.tngtech.archunit.core.domain.JavaClass;
 import org.assertj.core.api.AbstractIterableAssert;
 
 import static com.google.common.base.Predicates.not;
@@ -106,6 +107,10 @@ public class DependenciesAssertion extends AbstractIterableAssert<
         return String.format("Dependency [%s -> %s]", origin.getName(), target.getName());
     }
 
+    public static ExpectedDependenciesCreator from(JavaClass origin) {
+        return from(origin.reflect());
+    }
+
     public static ExpectedDependenciesCreator from(Class<?> origin) {
         return new ExpectedDependenciesCreator(new ExpectedDependencies(), origin);
     }
@@ -121,8 +126,21 @@ public class DependenciesAssertion extends AbstractIterableAssert<
         }
 
         public ExpectedDependenciesCreator withExpectedDescriptionTemplate(String descriptionTemplate) {
-            this.descriptionTemplate = Optional.of(descriptionTemplate);
+            this.descriptionTemplate = Optional.of(".*" + quote(descriptionTemplate) + ".*");
             return this;
+        }
+
+        public ExpectedDependenciesCreator withExpectedDescriptionPatternTemplate(String descriptionPatternTemplate) {
+            this.descriptionTemplate = Optional.of(descriptionPatternTemplate);
+            return this;
+        }
+
+        public ExpectedDependencies to(JavaClass... targets) {
+            List<Class<?>> reflectedTargets = new ArrayList<>();
+            for (JavaClass target : targets) {
+                reflectedTargets.add(target.reflect());
+            }
+            return to(reflectedTargets.toArray(new Class[0]));
         }
 
         public ExpectedDependencies to(Class<?>... targets) {
@@ -144,6 +162,10 @@ public class DependenciesAssertion extends AbstractIterableAssert<
             return expectedDependencies.iterator();
         }
 
+        public ExpectedDependenciesCreator from(JavaClass origin) {
+            return from(origin.reflect());
+        }
+
         public ExpectedDependenciesCreator from(Class<?> origin) {
             return new ExpectedDependenciesCreator(this, origin);
         }
@@ -151,13 +173,23 @@ public class DependenciesAssertion extends AbstractIterableAssert<
         void add(Class<?> origin, Class<?> target, Optional<String> descriptionTemplate) {
             ExpectedDependency expectedDependency = new ExpectedDependency(origin, target);
             if (descriptionTemplate.isPresent()) {
-                expectedDependency.descriptionContaining(descriptionTemplate.get().replace("#target", target.getName()));
+                expectedDependency.descriptionMatching(descriptionTemplate.get().replace("#target", quote(target.getName())));
             }
             expectedDependencies.add(expectedDependency);
         }
 
         public ExpectedDependencies withDescriptionContaining(String descriptionTemplate, Object... args) {
             getLast(expectedDependencies).descriptionContaining(descriptionTemplate, args);
+            return this;
+        }
+
+        public ExpectedDependencies withDescriptionMatching(String regexTemplate, Object... args) {
+            List<String> quotedArgs = new ArrayList<>();
+            for (Object arg : args) {
+                quotedArgs.add(quote(String.valueOf(arg)));
+            }
+            String regex = String.format(regexTemplate, quotedArgs.toArray());
+            getLast(expectedDependencies).descriptionMatching(regex);
             return this;
         }
 
@@ -190,6 +222,10 @@ public class DependenciesAssertion extends AbstractIterableAssert<
             descriptionPattern = Optional.of(Pattern.compile(".*" + quote(descriptionPart) + ".*"));
         }
 
+        public void descriptionMatching(String regex) {
+            descriptionPattern = Optional.of(Pattern.compile(regex));
+        }
+
         public void location(Class<?> location, int lineNumber) {
             locationPart = Optional.of(String.format("in (%s.java:%d)", location.getSimpleName(), lineNumber));
         }
@@ -198,7 +234,7 @@ public class DependenciesAssertion extends AbstractIterableAssert<
         public String toString() {
             String dependency = origin.getName() + " -> " + target.getName();
             String location = locationPart.isPresent() ? " " + locationPart.get() : "";
-            String description = descriptionPattern.isPresent() ? " with description matching " + descriptionPattern.get() : "";
+            String description = descriptionPattern.isPresent() ? " with description matching '" + descriptionPattern.get() + "'" : "";
             return dependency + location + description;
         }
     }

@@ -41,8 +41,11 @@ import com.tngtech.archunit.core.domain.JavaAnnotation;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClassDescriptor;
 import com.tngtech.archunit.core.domain.JavaEnumConstant;
+import com.tngtech.archunit.core.domain.JavaField;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.DomainBuilders.JavaAnnotationBuilder.ValueBuilder;
+import com.tngtech.archunit.core.importer.DomainBuilders.JavaTypeCreationProcess;
+import com.tngtech.archunit.core.importer.JavaCodeUnitSignatureImporter.JavaCodeUnitSignature;
 import com.tngtech.archunit.core.importer.RawAccessRecord.CodeUnit;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassVisitor;
@@ -50,6 +53,7 @@ import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.RecordComponentVisitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -141,6 +145,21 @@ class JavaClassProcessor extends ClassVisitor {
     }
 
     @Override
+    public RecordComponentVisitor visitRecordComponent(String name, String descriptor, String signature) {
+        javaClassBuilder.withRecord(true);
+
+        // Records are implicitly static and final (compare JLS 8.10 Record Declarations)
+        // Thus we ensure that those modifiers are always present (the access flag in visit(..) does not contain STATIC)
+        ImmutableSet<JavaModifier> recordModifiers = ImmutableSet.<JavaModifier>builder()
+                .addAll(javaClassBuilder.getModifiers())
+                .add(JavaModifier.STATIC, JavaModifier.FINAL)
+                .build();
+        javaClassBuilder.withModifiers(recordModifiers);
+
+        return super.visitRecordComponent(name, descriptor, signature);
+    }
+
+    @Override
     public void visitInnerClass(String name, String outerName, String innerName, int access) {
         if (importAborted()) {
             return;
@@ -184,6 +203,13 @@ class JavaClassProcessor extends ClassVisitor {
         }
 
         declarationHandler.registerEnclosingClass(className, createTypeName(owner));
+
+        if (name != null && desc != null) {
+            JavaClassDescriptor ownerType = JavaClassDescriptorImporter.createFromAsmObjectTypeName(owner);
+            List<JavaClassDescriptor> parameterTypes = JavaClassDescriptorImporter.importAsmMethodArgumentTypes(desc);
+            CodeUnit codeUnit = new CodeUnit(name, namesOf(parameterTypes), ownerType.getFullyQualifiedClassName());
+            declarationHandler.registerEnclosingCodeUnit(className, codeUnit);
+        }
     }
 
     private ImmutableSet<String> createInterfaceNames(String[] interfaces) {
@@ -204,9 +230,11 @@ class JavaClassProcessor extends ClassVisitor {
             return super.visitField(access, name, desc, signature, value);
         }
 
+        JavaClassDescriptor rawType = JavaClassDescriptorImporter.importAsmTypeFromDescriptor(desc);
+        Optional<JavaTypeCreationProcess<JavaField>> genericType = JavaFieldTypeSignatureImporter.parseAsmFieldTypeSignature(signature);
         DomainBuilders.JavaFieldBuilder fieldBuilder = new DomainBuilders.JavaFieldBuilder()
                 .withName(name)
-                .withType(JavaClassDescriptorImporter.importAsmTypeFromDescriptor(desc))
+                .withType(genericType, rawType)
                 .withModifiers(JavaModifier.getModifiersForField(access))
                 .withDescriptor(desc);
         declarationHandler.onDeclaredField(fieldBuilder);
@@ -224,11 +252,14 @@ class JavaClassProcessor extends ClassVisitor {
         accessHandler.setContext(new CodeUnit(name, namesOf(parameters), className));
 
         DomainBuilders.JavaCodeUnitBuilder<?, ?> codeUnitBuilder = addCodeUnitBuilder(name);
+        JavaCodeUnitSignature codeUnitSignature = JavaCodeUnitSignatureImporter.parseAsmMethodSignature(signature);
+        JavaClassDescriptor rawReturnType = JavaClassDescriptorImporter.importAsmMethodReturnType(desc);
         codeUnitBuilder
                 .withName(name)
                 .withModifiers(JavaModifier.getModifiersForMethod(access))
+                .withTypeParameters(codeUnitSignature.getTypeParameterBuilders())
                 .withParameters(parameters)
-                .withReturnType(JavaClassDescriptorImporter.importAsmMethodReturnType(desc))
+                .withReturnType(codeUnitSignature.getReturnType(), rawReturnType)
                 .withDescriptor(desc)
                 .withThrowsClause(typesFrom(exceptions));
 
@@ -434,9 +465,11 @@ class JavaClassProcessor extends ClassVisitor {
 
         void onNewClass(String className, Optional<String> superclassName, Set<String> interfaceNames);
 
-        void onDeclaredTypeParameters(DomainBuilders.TypeParametersBuilder typeParametersBuilder);
+        void onDeclaredTypeParameters(DomainBuilders.JavaClassTypeParametersBuilder typeParametersBuilder);
 
         void onGenericSuperclass(DomainBuilders.JavaParameterizedTypeBuilder<JavaClass> genericSuperclassBuilder);
+
+        void onGenericInterfaces(Set<DomainBuilders.JavaParameterizedTypeBuilder<JavaClass>> genericInterfaceBuilders);
 
         void onDeclaredField(DomainBuilders.JavaFieldBuilder fieldBuilder);
 
@@ -453,6 +486,8 @@ class JavaClassProcessor extends ClassVisitor {
         void onDeclaredAnnotationDefaultValue(String methodName, String methodDescriptor, ValueBuilder valueBuilder);
 
         void registerEnclosingClass(String ownerName, String enclosingClassName);
+
+        void registerEnclosingCodeUnit(String ownerName, CodeUnit enclosingCodeUnit);
     }
 
     interface AccessHandler {

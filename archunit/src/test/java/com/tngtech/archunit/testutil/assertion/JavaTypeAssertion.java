@@ -1,12 +1,7 @@
 package com.tngtech.archunit.testutil.assertion;
 
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-import com.google.common.base.Optional;
-import com.google.common.base.Strings;
-import com.google.common.collect.FluentIterable;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.domain.JavaParameterizedType;
@@ -14,21 +9,18 @@ import com.tngtech.archunit.core.domain.JavaType;
 import com.tngtech.archunit.core.domain.JavaTypeVariable;
 import com.tngtech.archunit.testutil.assertion.ExpectedConcreteType.ExpectedConcreteClass;
 import org.assertj.core.api.AbstractObjectAssert;
-import org.objectweb.asm.Type;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.isNullOrEmpty;
-import static com.tngtech.archunit.base.Guava.toGuava;
-import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
+import static com.tngtech.archunit.core.domain.Formatters.ensureCanonicalArrayTypeName;
 import static com.tngtech.archunit.testutil.Assertions.assertThatTypeVariable;
 import static com.tngtech.archunit.testutil.TestUtils.namesOf;
 import static com.tngtech.archunit.testutil.assertion.JavaAnnotationAssertion.propertiesOf;
 import static com.tngtech.archunit.testutil.assertion.JavaAnnotationAssertion.runtimePropertiesOf;
+import static com.tngtech.archunit.testutil.assertion.JavaTypeVariableAssertion.getTypeVariableWithName;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.guava.api.Assertions.assertThat;
 
 public class JavaTypeAssertion extends AbstractObjectAssert<JavaTypeAssertion, JavaType> {
-    private static final Pattern ARRAY_PATTERN = Pattern.compile("(\\[+)(.*)");
 
     public JavaTypeAssertion(JavaType javaType) {
         super(javaType, JavaTypeAssertion.class);
@@ -45,7 +37,7 @@ public class JavaTypeAssertion extends AbstractObjectAssert<JavaTypeAssertion, J
         assertThat(javaClass.getName()).as(describeAssertion("Name of " + javaClass))
                 .isEqualTo(clazz.getName());
         assertThat(javaClass.getSimpleName()).as(describeAssertion("Simple name of " + javaClass))
-                .isEqualTo(ensureArrayName(clazz.getSimpleName()));
+                .isEqualTo(ensureCanonicalArrayTypeName(clazz.getSimpleName()));
         assertThat(javaClass.getPackage().getName()).as(describeAssertion("Package of " + javaClass))
                 .isEqualTo(getExpectedPackageName(clazz));
         assertThat(javaClass.getPackageName()).as(describeAssertion("Package name of " + javaClass))
@@ -63,6 +55,10 @@ public class JavaTypeAssertion extends AbstractObjectAssert<JavaTypeAssertion, J
         }
     }
 
+    public void matches(ExpectedConcreteType type) {
+        type.assertMatchWith(actual, new DescriptionContext(""));
+    }
+
     private String describeAssertion(String partialAssertionDescription) {
         return isNullOrEmpty(descriptionText())
                 ? partialAssertionDescription
@@ -74,14 +70,9 @@ public class JavaTypeAssertion extends AbstractObjectAssert<JavaTypeAssertion, J
         return this;
     }
 
-    @SuppressWarnings("OptionalGetWithoutIsPresent") // checked via AssertJ
     public JavaTypeVariableOfClassAssertion hasTypeParameter(String name) {
-        List<JavaTypeVariable<JavaClass>> typeVariables = actualClass().getTypeParameters();
-
-        Optional<JavaTypeVariable<JavaClass>> variable = FluentIterable.from(typeVariables).firstMatch(toGuava(name(name)));
-        assertThat(variable).as("Type variable with name '%s'", name).isPresent();
-
-        return new JavaTypeVariableOfClassAssertion(variable.get());
+        JavaTypeVariable<JavaClass> typeVariable = getTypeVariableWithName(name, actualClass().getTypeParameters());
+        return new JavaTypeVariableOfClassAssertion(typeVariable);
     }
 
     public JavaTypeVariableOfClassAssertion hasOnlyTypeParameter(String name) {
@@ -113,16 +104,6 @@ public class JavaTypeAssertion extends AbstractObjectAssert<JavaTypeAssertion, J
     private JavaClass actualClass() {
         assertThat(actual).as(describeAssertion(actual.getName())).isInstanceOf(JavaClass.class);
         return (JavaClass) actual;
-    }
-
-    private String ensureArrayName(String name) {
-        String suffix = "";
-        Matcher matcher = ARRAY_PATTERN.matcher(name);
-        if (matcher.matches()) {
-            name = Type.getType(matcher.group(2)).getClassName();
-            suffix = Strings.repeat("[]", matcher.group(1).length());
-        }
-        return name + suffix;
     }
 
     public static String getExpectedPackageName(Class<?> clazz) {

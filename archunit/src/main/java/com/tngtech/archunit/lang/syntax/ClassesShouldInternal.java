@@ -545,6 +545,21 @@ class ClassesShouldInternal extends ObjectsShouldInternal<JavaClass>
     }
 
     @Override
+    public ClassesThat<ClassesShouldConjunction> transitivelyDependOnClassesThat() {
+        return new ClassesThatInternal<>(new Function<DescribedPredicate<? super JavaClass>, ClassesShouldConjunction>() {
+            @Override
+            public ClassesShouldConjunction apply(DescribedPredicate<? super JavaClass> predicate) {
+                return addCondition(ArchConditions.transitivelyDependOnClassesThat(predicate));
+            }
+        });
+    }
+
+    @Override
+    public ClassesShouldConjunction transitivelyDependOnClassesThat(DescribedPredicate<? super JavaClass> predicate) {
+        return addCondition(ArchConditions.transitivelyDependOnClassesThat(predicate));
+    }
+
+    @Override
     public OnlyBeAccessedSpecification<ClassesShouldConjunction> onlyBeAccessed() {
         return new OnlyBeAccessedSpecificationInternal(this);
     }
@@ -582,6 +597,16 @@ class ClassesShouldInternal extends ObjectsShouldInternal<JavaClass>
     @Override
     public ClassesShouldConjunction notBeEnums() {
         return addCondition(ArchConditions.notBeEnums());
+    }
+
+    @Override
+    public ClassesShouldConjunction beRecords() {
+        return addCondition(ArchConditions.beRecords());
+    }
+
+    @Override
+    public ClassesShouldConjunction notBeRecords() {
+        return addCondition(ArchConditions.notBeRecords());
     }
 
     @Override

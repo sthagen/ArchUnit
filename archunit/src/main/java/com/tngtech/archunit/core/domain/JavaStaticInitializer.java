@@ -16,6 +16,7 @@
 package com.tngtech.archunit.core.domain;
 
 import java.lang.reflect.Member;
+import java.util.List;
 import java.util.Set;
 
 import com.tngtech.archunit.PublicAPI;
@@ -24,12 +25,32 @@ import com.tngtech.archunit.core.importer.DomainBuilders.JavaStaticInitializerBu
 import static com.tngtech.archunit.PublicAPI.Usage.ACCESS;
 import static java.util.Collections.emptySet;
 
+/**
+ * Represents the static initialization block of a class, e.g. a block like
+ * <br><br>
+ * <pre><code>
+ * class Example {
+ *     private static final String someStaticField;
+ *
+ *     static {
+ *         // this is the static initializer, it can for example initialize static fields
+ *         someStaticField = readSomeConfig();
+ *     }
+ * }
+ * </code></pre>
+ */
 public class JavaStaticInitializer extends JavaCodeUnit {
     @PublicAPI(usage = ACCESS)
     public static final String STATIC_INITIALIZER_NAME = "<clinit>";
 
     JavaStaticInitializer(JavaStaticInitializerBuilder builder) {
         super(builder);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked") // Cast is safe, because OWNER always refers to this object
+    public List<JavaTypeVariable<JavaStaticInitializer>> getTypeParameters() {
+        return (List<JavaTypeVariable<JavaStaticInitializer>>) super.getTypeParameters();
     }
 
     @Override

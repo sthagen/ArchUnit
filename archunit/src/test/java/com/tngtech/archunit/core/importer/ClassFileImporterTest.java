@@ -3,6 +3,7 @@ package com.tngtech.archunit.core.importer;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.Serializable;
 import java.lang.annotation.Annotation;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
@@ -145,6 +146,7 @@ public class ClassFileImporterTest {
                 .isInterface(false)
                 .isEnum(false)
                 .isAnnotation(false)
+                .isRecord(false)
                 .hasNoEnclosingClass()
                 .isTopLevelClass(true)
                 .isNestedClass(false)
@@ -167,7 +169,8 @@ public class ClassFileImporterTest {
                 .hasAllInterfacesMatchingInAnyOrder(Enum.class.getInterfaces())
                 .isInterface(false)
                 .isEnum(true)
-                .isAnnotation(false);
+                .isAnnotation(false)
+                .isRecord(false);
 
         JavaEnumConstant constant = javaClass.getEnumConstant(EnumToImport.FIRST.name());
         assertThatType(constant.getDeclaringClass()).as("declaring class").isEqualTo(javaClass);
@@ -193,7 +196,8 @@ public class ClassFileImporterTest {
                 .isMemberClass(true)
                 .isInnerClass(false)
                 .isLocalClass(false)
-                .isAnonymousClass(false);
+                .isAnonymousClass(false)
+                .isRecord(false);
     }
 
     @Test
@@ -207,7 +211,8 @@ public class ClassFileImporterTest {
                 .isMemberClass(true)
                 .isInnerClass(true)
                 .isLocalClass(false)
-                .isAnonymousClass(false);
+                .isAnonymousClass(false)
+                .isRecord(false);
     }
 
     @Test
@@ -222,7 +227,8 @@ public class ClassFileImporterTest {
                 .isMemberClass(false)
                 .isInnerClass(true)
                 .isLocalClass(false)
-                .isAnonymousClass(true);
+                .isAnonymousClass(true)
+                .isRecord(false);
     }
 
     @Test
@@ -237,7 +243,8 @@ public class ClassFileImporterTest {
                 .isMemberClass(false)
                 .isInnerClass(true)
                 .isLocalClass(true)
-                .isAnonymousClass(false);
+                .isAnonymousClass(false)
+                .isRecord(false);
     }
 
     @Test
@@ -265,7 +272,8 @@ public class ClassFileImporterTest {
                 .hasNoSuperclass()
                 .hasNoInterfaces()
                 .isInterface(true)
-                .isEnum(false);
+                .isEnum(false)
+                .isRecord(false);
     }
 
     @Test
@@ -414,15 +422,15 @@ public class ClassFileImporterTest {
         JavaClass someCollection = classes.get(SomeCollection.class);
         JavaClass collectionInterface = classes.get(CollectionInterface.class);
 
-        assertThat(baseClass.getInterfaces()).containsOnly(otherInterface);
-        assertThat(baseClass.getAllInterfaces()).containsOnly(otherInterface, grandParentInterface);
-        assertThat(subclass.getInterfaces()).containsOnly(subinterface);
-        assertThat(subclass.getAllInterfaces()).containsOnly(
+        assertThat(baseClass.getRawInterfaces()).containsOnly(otherInterface);
+        assertThat(baseClass.getAllRawInterfaces()).containsOnly(otherInterface, grandParentInterface);
+        assertThat(subclass.getRawInterfaces()).containsOnly(subinterface);
+        assertThat(subclass.getAllRawInterfaces()).containsOnly(
                 subinterface, otherInterface, parentInterface, grandParentInterface);
-        assertThat(otherSubclass.getInterfaces()).containsOnly(parentInterface);
-        assertThat(otherSubclass.getAllInterfaces()).containsOnly(parentInterface, grandParentInterface, otherInterface);
-        assertThat(someCollection.getInterfaces()).containsOnly(collectionInterface, otherInterface, subinterface);
-        assertThat(someCollection.getAllInterfaces()).extractingResultOf("reflect").containsOnly(
+        assertThat(otherSubclass.getRawInterfaces()).containsOnly(parentInterface);
+        assertThat(otherSubclass.getAllRawInterfaces()).containsOnly(parentInterface, grandParentInterface, otherInterface);
+        assertThat(someCollection.getRawInterfaces()).containsOnly(collectionInterface, otherInterface, subinterface);
+        assertThat(someCollection.getAllRawInterfaces()).extractingResultOf("reflect").containsOnly(
                 CollectionInterface.class, OtherInterface.class, Subinterface.class, ParentInterface.class,
                 GrandParentInterface.class, Collection.class, Iterable.class);
     }
@@ -435,12 +443,12 @@ public class ClassFileImporterTest {
         JavaClass grandParentInterface = classes.get(GrandParentInterface.class);
         JavaClass collectionInterface = classes.get(CollectionInterface.class);
 
-        assertThat(grandParentInterface.getAllInterfaces()).isEmpty();
-        assertThat(parentInterface.getInterfaces()).containsOnly(grandParentInterface);
-        assertThat(parentInterface.getAllInterfaces()).containsOnly(grandParentInterface);
-        assertThat(subinterface.getInterfaces()).containsOnly(parentInterface);
-        assertThat(subinterface.getAllInterfaces()).containsOnly(parentInterface, grandParentInterface);
-        assertThat(collectionInterface.getInterfaces()).extractingResultOf("reflect").containsOnly(Collection.class);
+        assertThat(grandParentInterface.getAllRawInterfaces()).isEmpty();
+        assertThat(parentInterface.getRawInterfaces()).containsOnly(grandParentInterface);
+        assertThat(parentInterface.getAllRawInterfaces()).containsOnly(grandParentInterface);
+        assertThat(subinterface.getRawInterfaces()).containsOnly(parentInterface);
+        assertThat(subinterface.getAllRawInterfaces()).containsOnly(parentInterface, grandParentInterface);
+        assertThat(collectionInterface.getRawInterfaces()).extractingResultOf("reflect").containsOnly(Collection.class);
     }
 
     @Test
@@ -467,7 +475,7 @@ public class ClassFileImporterTest {
         assertThat(parentInterface.getSubclasses()).containsOnly(subinterface, otherSubclass);
         assertThat(parentInterface.getAllSubclasses()).containsOnly(
                 subinterface, subclass, subSubclass, subSubSubclass, subSubSubSubclass, someCollection, otherSubclass);
-        JavaClass collection = getOnlyElement(collectionInterface.getInterfaces());
+        JavaClass collection = getOnlyElement(collectionInterface.getRawInterfaces());
         assertThat(collection.getAllSubclasses()).containsOnly(collectionInterface, someCollection);
     }
 
@@ -483,7 +491,7 @@ public class ClassFileImporterTest {
                         BaseClass.class.getName(),
                         Object.class.getName());
 
-        assertThat(javaClass.getAllInterfaces()).extracting("name")
+        assertThat(javaClass.getAllRawInterfaces()).extracting("name")
                 .containsOnly(
                         Subinterface.class.getName(),
                         YetAnotherInterface.class.getName(),
@@ -513,6 +521,104 @@ public class ClassFileImporterTest {
 
         call = getOnlyElement(localClass.getCodeUnitWithParameterTypes("call").getMethodCallsFromSelf());
         assertThatCall(call).isFrom("call").isTo(calledTarget).inLineNumber(21);
+    }
+
+    @Test
+    public void imports_enclosing_method_of_local_class() throws ClassNotFoundException {
+        @SuppressWarnings("unused")
+        class ClassCreatingLocalClassInMethod {
+            void someMethod() {
+                class SomeLocalClass {
+                }
+            }
+        }
+        String localClassName = ClassCreatingLocalClassInMethod.class.getName() + "$1SomeLocalClass";
+        JavaClasses classes = new ClassFileImporter().importClasses(
+                ClassCreatingLocalClassInMethod.class, Class.forName(localClassName)
+        );
+        JavaClass enclosingClass = classes.get(ClassCreatingLocalClassInMethod.class);
+        JavaClass localClass = classes.get(localClassName);
+
+        assertThat(localClass.getEnclosingCodeUnit()).contains(enclosingClass.getMethod("someMethod"));
+        assertThat(localClass.getEnclosingClass()).contains(enclosingClass);
+    }
+
+    @Test
+    public void imports_enclosing_constructor_of_local_class() throws ClassNotFoundException {
+        @SuppressWarnings("unused")
+        class ClassCreatingLocalClassInConstructor {
+            ClassCreatingLocalClassInConstructor() {
+                class SomeLocalClass {
+                }
+            }
+        }
+        String localClassName = ClassCreatingLocalClassInConstructor.class.getName() + "$1SomeLocalClass";
+        JavaClasses classes = new ClassFileImporter().importClasses(
+                ClassCreatingLocalClassInConstructor.class, Class.forName(localClassName)
+        );
+        JavaClass enclosingClass = classes.get(ClassCreatingLocalClassInConstructor.class);
+        JavaClass localClass = classes.get(localClassName);
+
+        assertThat(localClass.getEnclosingCodeUnit()).contains(enclosingClass.getConstructor(getClass()));
+        assertThat(localClass.getEnclosingClass()).contains(enclosingClass);
+    }
+
+    @Test
+    public void imports_enclosing_method_of_anonymous_class() throws ClassNotFoundException {
+        @SuppressWarnings("unused")
+        class ClassCreatingAnonymousClassInMethod {
+            void someMethod() {
+                new Serializable() {
+                };
+            }
+        }
+        String anonymousClassName = ClassCreatingAnonymousClassInMethod.class.getName() + "$1";
+        JavaClasses classes = new ClassFileImporter().importClasses(
+                ClassCreatingAnonymousClassInMethod.class, Class.forName(anonymousClassName)
+        );
+        JavaClass enclosingClass = classes.get(ClassCreatingAnonymousClassInMethod.class);
+        JavaClass anonymousClass = classes.get(anonymousClassName);
+
+        assertThat(anonymousClass.getEnclosingCodeUnit()).contains(enclosingClass.getMethod("someMethod"));
+        assertThat(anonymousClass.getEnclosingClass()).contains(enclosingClass);
+    }
+
+    @Test
+    public void imports_enclosing_constructor_of_anonymous_class() throws ClassNotFoundException {
+        @SuppressWarnings("unused")
+        class ClassCreatingAnonymousClassInConstructor {
+            ClassCreatingAnonymousClassInConstructor() {
+                new Serializable() {
+                };
+            }
+        }
+        String anonymousClassName = ClassCreatingAnonymousClassInConstructor.class.getName() + "$1";
+        JavaClasses classes = new ClassFileImporter().importClasses(
+                ClassCreatingAnonymousClassInConstructor.class, Class.forName(anonymousClassName)
+        );
+        JavaClass enclosingClass = classes.get(ClassCreatingAnonymousClassInConstructor.class);
+        JavaClass anonymousClass = classes.get(anonymousClassName);
+
+        assertThat(anonymousClass.getEnclosingCodeUnit()).contains(enclosingClass.getConstructor(getClass()));
+        assertThat(anonymousClass.getEnclosingClass()).contains(enclosingClass);
+    }
+
+    @Test
+    public void imports_no_enclosing_code_unit_of_anonymous_class_defined_outside_of_method() throws ClassNotFoundException {
+        @SuppressWarnings("unused")
+        class ClassCreatingAnonymousClassInConstructor {
+            final Serializable field = new Serializable() {
+            };
+        }
+        String anonymousClassName = ClassCreatingAnonymousClassInConstructor.class.getName() + "$1";
+        JavaClasses classes = new ClassFileImporter().importClasses(
+                ClassCreatingAnonymousClassInConstructor.class, Class.forName(anonymousClassName)
+        );
+        JavaClass enclosingClass = classes.get(ClassCreatingAnonymousClassInConstructor.class);
+        JavaClass anonymousClass = classes.get(anonymousClassName);
+
+        assertThat(anonymousClass.getEnclosingClass()).contains(enclosingClass);
+        assertThat(anonymousClass.getEnclosingCodeUnit()).isAbsent();
     }
 
     @Test
